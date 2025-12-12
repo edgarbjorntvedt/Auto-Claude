@@ -20,14 +20,14 @@ interface ImageUploadProps {
 /**
  * Generate a unique ID for images
  */
-function generateId(): string {
+export function generateImageId(): string {
   return `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
 /**
  * Format file size for display
  */
-function formatFileSize(bytes: number): string {
+export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -36,14 +36,21 @@ function formatFileSize(bytes: number): string {
 /**
  * Check if a file is a valid image type
  */
-function isValidImageType(file: File): boolean {
+export function isValidImageType(file: File): boolean {
   return ALLOWED_IMAGE_TYPES.includes(file.type as (typeof ALLOWED_IMAGE_TYPES)[number]);
+}
+
+/**
+ * Check if a MIME type is a valid image type
+ */
+export function isValidImageMimeType(mimeType: string): boolean {
+  return ALLOWED_IMAGE_TYPES.includes(mimeType as (typeof ALLOWED_IMAGE_TYPES)[number]);
 }
 
 /**
  * Convert a File to base64 data URL
  */
-async function fileToBase64(file: File): Promise<string> {
+export async function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -53,9 +60,21 @@ async function fileToBase64(file: File): Promise<string> {
 }
 
 /**
+ * Convert a Blob to base64 data URL
+ */
+export async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
  * Create a thumbnail from an image data URL
  */
-async function createThumbnail(dataUrl: string, maxSize = 200): Promise<string> {
+export async function createThumbnail(dataUrl: string, maxSize = 200): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -90,7 +109,7 @@ async function createThumbnail(dataUrl: string, maxSize = 200): Promise<string> 
 /**
  * Resolve duplicate filenames by adding timestamp
  */
-function resolveFilename(filename: string, existingFiles: string[]): string {
+export function resolveFilename(filename: string, existingFiles: string[]): string {
   if (!existingFiles.includes(filename)) {
     return filename;
   }
@@ -162,7 +181,7 @@ export function ImageUpload({
           ]);
 
           newImages.push({
-            id: generateId(),
+            id: generateImageId(),
             filename: resolvedFilename,
             mimeType: file.type,
             size: file.size,

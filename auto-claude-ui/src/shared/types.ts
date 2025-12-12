@@ -139,6 +139,19 @@ export interface ImageAttachment {
   thumbnail?: string;   // Base64 thumbnail for preview
 }
 
+// Draft state for task creation (auto-saved when dialog closes)
+export interface TaskDraft {
+  projectId: string;
+  title: string;
+  description: string;
+  category: TaskCategory | '';
+  priority: TaskPriority | '';
+  complexity: TaskComplexity | '';
+  impact: TaskImpact | '';
+  images: ImageAttachment[];
+  savedAt: Date;
+}
+
 // Task metadata from ideation or manual entry
 export type TaskComplexity = 'trivial' | 'small' | 'medium' | 'large' | 'complex';
 export type TaskImpact = 'low' | 'medium' | 'high' | 'critical';

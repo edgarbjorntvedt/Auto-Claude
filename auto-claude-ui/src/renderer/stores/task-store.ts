@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Task, TaskStatus, ImplementationPlan, Chunk, TaskMetadata, ExecutionProgress, ExecutionPhase, ReviewReason } from '../../shared/types';
+import type { Task, TaskStatus, ImplementationPlan, Chunk, TaskMetadata, ExecutionProgress, ExecutionPhase, ReviewReason, TaskDraft } from '../../shared/types';
 
 interface TaskState {
   tasks: Task[];
@@ -384,4 +384,94 @@ export async function deleteTask(
       error: error instanceof Error ? error.message : 'Unknown error'
     };
   }
+}
+
+// ============================================
+// Task Creation Draft Management
+// ============================================
+
+const DRAFT_KEY_PREFIX = 'task-creation-draft';
+
+/**
+ * Get the localStorage key for a project's draft
+ */
+function getDraftKey(projectId: string): string {
+  return `${DRAFT_KEY_PREFIX}-${projectId}`;
+}
+
+/**
+ * Save a task creation draft to localStorage
+ * Note: For large images, we only store thumbnails in the draft to avoid localStorage limits
+ */
+export function saveDraft(draft: TaskDraft): void {
+  try {
+    const key = getDraftKey(draft.projectId);
+    // Create a copy with thumbnails only to avoid localStorage size limits
+    const draftToStore = {
+      ...draft,
+      images: draft.images.map(img => ({
+        ...img,
+        data: undefined // Don't store full image data in localStorage
+      })),
+      savedAt: new Date().toISOString()
+    };
+    localStorage.setItem(key, JSON.stringify(draftToStore));
+  } catch (error) {
+    console.error('Failed to save draft:', error);
+  }
+}
+
+/**
+ * Load a task creation draft from localStorage
+ */
+export function loadDraft(projectId: string): TaskDraft | null {
+  try {
+    const key = getDraftKey(projectId);
+    const stored = localStorage.getItem(key);
+    if (!stored) return null;
+
+    const draft = JSON.parse(stored);
+    // Convert savedAt back to Date
+    draft.savedAt = new Date(draft.savedAt);
+    return draft as TaskDraft;
+  } catch (error) {
+    console.error('Failed to load draft:', error);
+    return null;
+  }
+}
+
+/**
+ * Clear a task creation draft from localStorage
+ */
+export function clearDraft(projectId: string): void {
+  try {
+    const key = getDraftKey(projectId);
+    localStorage.removeItem(key);
+  } catch (error) {
+    console.error('Failed to clear draft:', error);
+  }
+}
+
+/**
+ * Check if a draft exists for a project
+ */
+export function hasDraft(projectId: string): boolean {
+  const key = getDraftKey(projectId);
+  return localStorage.getItem(key) !== null;
+}
+
+/**
+ * Check if a draft has any meaningful content (title, description, or images)
+ */
+export function isDraftEmpty(draft: TaskDraft | null): boolean {
+  if (!draft) return true;
+  return (
+    !draft.title.trim() &&
+    !draft.description.trim() &&
+    draft.images.length === 0 &&
+    !draft.category &&
+    !draft.priority &&
+    !draft.complexity &&
+    !draft.impact
+  );
 }

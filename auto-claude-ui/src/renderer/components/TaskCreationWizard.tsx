@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Loader2, ChevronDown, ChevronUp, Image as ImageIcon } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, type ClipboardEvent } from 'react';
+import { Loader2, ChevronDown, ChevronUp, Image as ImageIcon, X, RotateCcw } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -19,15 +19,24 @@ import {
   SelectTrigger,
   SelectValue
 } from './ui/select';
-import { ImageUpload } from './ImageUpload';
-import { createTask } from '../stores/task-store';
+import {
+  ImageUpload,
+  generateImageId,
+  blobToBase64,
+  createThumbnail,
+  isValidImageMimeType,
+  resolveFilename
+} from './ImageUpload';
+import { createTask, saveDraft, loadDraft, clearDraft, isDraftEmpty } from '../stores/task-store';
 import { cn } from '../lib/utils';
-import type { TaskCategory, TaskPriority, TaskComplexity, TaskImpact, TaskMetadata, ImageAttachment } from '../../shared/types';
+import type { TaskCategory, TaskPriority, TaskComplexity, TaskImpact, TaskMetadata, ImageAttachment, TaskDraft } from '../../shared/types';
 import {
   TASK_CATEGORY_LABELS,
   TASK_PRIORITY_LABELS,
   TASK_COMPLEXITY_LABELS,
-  TASK_IMPACT_LABELS
+  TASK_IMPACT_LABELS,
+  MAX_IMAGES_PER_TASK,
+  ALLOWED_IMAGE_TYPES_DISPLAY
 } from '../../shared/constants';
 
 interface TaskCreationWizardProps {
@@ -57,6 +66,133 @@ export function TaskCreationWizard({
   // Image attachments
   const [images, setImages] = useState<ImageAttachment[]>([]);
 
+  // Draft state
+  const [isDraftRestored, setIsDraftRestored] = useState(false);
+  const [pasteSuccess, setPasteSuccess] = useState(false);
+
+  // Ref for the textarea to handle paste events
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load draft when dialog opens
+  useEffect(() => {
+    if (open && projectId) {
+      const draft = loadDraft(projectId);
+      if (draft && !isDraftEmpty(draft)) {
+        setTitle(draft.title);
+        setDescription(draft.description);
+        setCategory(draft.category);
+        setPriority(draft.priority);
+        setComplexity(draft.complexity);
+        setImpact(draft.impact);
+        setImages(draft.images);
+        setIsDraftRestored(true);
+
+        // Expand sections if they have content
+        if (draft.category || draft.priority || draft.complexity || draft.impact) {
+          setShowAdvanced(true);
+        }
+        if (draft.images.length > 0) {
+          setShowImages(true);
+        }
+      }
+    }
+  }, [open, projectId]);
+
+  /**
+   * Get current form state as a draft
+   */
+  const getCurrentDraft = useCallback((): TaskDraft => ({
+    projectId,
+    title,
+    description,
+    category,
+    priority,
+    complexity,
+    impact,
+    images,
+    savedAt: new Date()
+  }), [projectId, title, description, category, priority, complexity, impact, images]);
+
+  /**
+   * Handle paste event for screenshot support
+   */
+  const handlePaste = useCallback(async (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const clipboardItems = e.clipboardData?.items;
+    if (!clipboardItems) return;
+
+    // Find image items in clipboard
+    const imageItems: DataTransferItem[] = [];
+    for (let i = 0; i < clipboardItems.length; i++) {
+      const item = clipboardItems[i];
+      if (item.type.startsWith('image/')) {
+        imageItems.push(item);
+      }
+    }
+
+    // If no images, allow normal paste behavior
+    if (imageItems.length === 0) return;
+
+    // Prevent default paste when we have images
+    e.preventDefault();
+
+    // Check if we can add more images
+    const remainingSlots = MAX_IMAGES_PER_TASK - images.length;
+    if (remainingSlots <= 0) {
+      setError(`Maximum of ${MAX_IMAGES_PER_TASK} images allowed`);
+      return;
+    }
+
+    setError(null);
+
+    // Process image items
+    const newImages: ImageAttachment[] = [];
+    const existingFilenames = images.map(img => img.filename);
+
+    for (const item of imageItems.slice(0, remainingSlots)) {
+      const file = item.getAsFile();
+      if (!file) continue;
+
+      // Validate image type
+      if (!isValidImageMimeType(file.type)) {
+        setError(`Invalid image type. Allowed: ${ALLOWED_IMAGE_TYPES_DISPLAY}`);
+        continue;
+      }
+
+      try {
+        const dataUrl = await blobToBase64(file);
+        const thumbnail = await createThumbnail(dataUrl);
+
+        // Generate filename for pasted images (screenshot-timestamp.ext)
+        const extension = file.type.split('/')[1] || 'png';
+        const baseFilename = `screenshot-${Date.now()}.${extension}`;
+        const resolvedFilename = resolveFilename(baseFilename, [
+          ...existingFilenames,
+          ...newImages.map(img => img.filename)
+        ]);
+
+        newImages.push({
+          id: generateImageId(),
+          filename: resolvedFilename,
+          mimeType: file.type,
+          size: file.size,
+          data: dataUrl.split(',')[1], // Store base64 without data URL prefix
+          thumbnail
+        });
+      } catch {
+        setError('Failed to process pasted image');
+      }
+    }
+
+    if (newImages.length > 0) {
+      setImages(prev => [...prev, ...newImages]);
+      // Auto-expand images section
+      setShowImages(true);
+      // Show success feedback
+      setPasteSuccess(true);
+      setTimeout(() => setPasteSuccess(false), 2000);
+    }
+  }, [images]);
+
   const handleCreate = async () => {
     if (!title.trim() || !description.trim()) {
       setError('Please provide both a title and description');
@@ -80,6 +216,8 @@ export function TaskCreationWizard({
 
       const task = await createTask(projectId, title.trim(), description.trim(), metadata);
       if (task) {
+        // Clear draft on successful creation
+        clearDraft(projectId);
         // Reset form and close
         resetForm();
         onOpenChange(false);
@@ -104,20 +242,62 @@ export function TaskCreationWizard({
     setError(null);
     setShowAdvanced(false);
     setShowImages(false);
+    setIsDraftRestored(false);
+    setPasteSuccess(false);
   };
 
+  /**
+   * Handle dialog close - save draft if content exists
+   */
   const handleClose = () => {
-    if (!isCreating) {
-      resetForm();
-      onOpenChange(false);
+    if (isCreating) return;
+
+    const draft = getCurrentDraft();
+
+    // Save draft if there's any content
+    if (!isDraftEmpty(draft)) {
+      saveDraft(draft);
+    } else {
+      // Clear any existing draft if form is empty
+      clearDraft(projectId);
     }
+
+    resetForm();
+    onOpenChange(false);
+  };
+
+  /**
+   * Discard draft and start fresh
+   */
+  const handleDiscardDraft = () => {
+    clearDraft(projectId);
+    resetForm();
+    setError(null);
   };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-foreground">Create New Task</DialogTitle>
+          <div className="flex items-center justify-between">
+            <DialogTitle className="text-foreground">Create New Task</DialogTitle>
+            {isDraftRestored && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs bg-info/10 text-info px-2 py-1 rounded-md">
+                  Draft restored
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={handleDiscardDraft}
+                >
+                  <RotateCcw className="h-3 w-3 mr-1" />
+                  Start Fresh
+                </Button>
+              </div>
+            )}
+          </div>
           <DialogDescription>
             Describe what you want to build. The AI will analyze your request and
             create a detailed specification.
@@ -145,18 +325,27 @@ export function TaskCreationWizard({
               Description
             </Label>
             <Textarea
+              ref={descriptionRef}
               id="description"
               placeholder="Describe the feature, bug fix, or improvement you want to implement. Be as specific as possible about requirements, constraints, and expected behavior."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              onPaste={handlePaste}
               rows={5}
               disabled={isCreating}
             />
             <p className="text-xs text-muted-foreground">
-              Tip: Include details about UI changes, API endpoints, data models,
-              and any technical requirements.
+              Tip: Paste screenshots directly with {navigator.platform.includes('Mac') ? '⌘V' : 'Ctrl+V'} to add reference images.
             </p>
           </div>
+
+          {/* Paste Success Indicator */}
+          {pasteSuccess && (
+            <div className="flex items-center gap-2 text-sm text-success animate-in fade-in slide-in-from-top-1 duration-200">
+              <ImageIcon className="h-4 w-4" />
+              Image added successfully!
+            </div>
+          )}
 
           {/* Advanced Options Toggle */}
           <button
@@ -321,8 +510,9 @@ export function TaskCreationWizard({
 
           {/* Error */}
           {error && (
-            <div className="rounded-lg bg-[var(--error-light)] border border-[var(--error)]/30 p-3 text-sm text-[var(--error)]">
-              {error}
+            <div className="flex items-start gap-2 rounded-lg bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">
+              <X className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <span>{error}</span>
             </div>
           )}
         </div>
