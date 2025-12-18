@@ -18,6 +18,7 @@ export * from './integrations';
 export * from './app-update';
 export * from './glossary';
 export * from './status';
+export * from './app-update';
 
 // IPC types (must be last to use types from other modules)
 export * from './ipc';
