@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useProjectStore } from '../stores/project-store';
 import { useTaskStore } from '../stores/task-store';
-import { useGitHubIssues, useGitHubInvestigation, useIssueFiltering } from './github-issues/hooks';
+import { useGitHubIssues, useGitHubInvestigation, useIssueFiltering, useAutoFix } from './github-issues/hooks';
 import {
   NotConnectedState,
   EmptyState,
@@ -41,6 +41,8 @@ export function GitHubIssues({ onOpenSettings, onNavigateToTask }: GitHubIssuesP
   } = useGitHubInvestigation(selectedProject?.id);
 
   const { searchQuery, setSearchQuery, filteredIssues } = useIssueFiltering(getFilteredIssues());
+
+  const { config: autoFixConfig, getQueueItem: getAutoFixQueueItem } = useAutoFix(selectedProject?.id);
 
   const [showInvestigateDialog, setShowInvestigateDialog] = useState(false);
   const [selectedIssueForInvestigation, setSelectedIssueForInvestigation] = useState<GitHubIssue | null>(null);
@@ -125,6 +127,9 @@ export function GitHubIssues({ onOpenSettings, onNavigateToTask }: GitHubIssuesP
               }
               linkedTaskId={issueToTaskMap.get(selectedIssue.number)}
               onViewTask={onNavigateToTask}
+              projectId={selectedProject?.id}
+              autoFixConfig={autoFixConfig}
+              autoFixQueueItem={getAutoFixQueueItem(selectedIssue.number)}
             />
           ) : (
             <EmptyState message="Select an issue to view details" />

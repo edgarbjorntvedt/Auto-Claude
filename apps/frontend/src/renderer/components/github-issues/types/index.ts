@@ -1,4 +1,5 @@
 import type { GitHubIssue, GitHubInvestigationResult } from '../../../../shared/types';
+import type { AutoFixConfig, AutoFixQueueItem } from '../../../../preload/api/modules/github-api';
 
 export type FilterState = 'open' | 'closed' | 'all';
 
@@ -23,6 +24,12 @@ export interface IssueDetailProps {
   linkedTaskId?: string;
   /** Handler to navigate to view the linked task */
   onViewTask?: (taskId: string) => void;
+  /** Project ID for auto-fix functionality */
+  projectId?: string;
+  /** Auto-fix configuration */
+  autoFixConfig?: AutoFixConfig | null;
+  /** Auto-fix queue item for this issue */
+  autoFixQueueItem?: AutoFixQueueItem | null;
 }
 
 export interface InvestigationDialogProps {

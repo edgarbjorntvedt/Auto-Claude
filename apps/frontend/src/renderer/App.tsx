@@ -40,6 +40,7 @@ import { Context } from './components/Context';
 import { Ideation } from './components/Ideation';
 import { Insights } from './components/Insights';
 import { GitHubIssues } from './components/GitHubIssues';
+import { GitHubPRs } from './components/github-prs';
 import { Changelog } from './components/Changelog';
 import { Worktrees } from './components/Worktrees';
 import { WelcomeScreen } from './components/WelcomeScreen';
@@ -663,6 +664,14 @@ export function App() {
                       setIsSettingsDialogOpen(true);
                     }}
                     onNavigateToTask={handleGoToTask}
+                  />
+                )}
+                {activeView === 'github-prs' && (activeProjectId || selectedProjectId) && (
+                  <GitHubPRs
+                    onOpenSettings={() => {
+                      setSettingsInitialProjectSection('github');
+                      setIsSettingsDialogOpen(true);
+                    }}
                   />
                 )}
                 {activeView === 'changelog' && (activeProjectId || selectedProjectId) && (

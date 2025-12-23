@@ -12,6 +12,42 @@ import type {
 import { createIpcListener, invokeIpc, sendIpc, IpcListenerCleanup } from './ipc-utils';
 
 /**
+ * Auto-fix configuration
+ */
+export interface AutoFixConfig {
+  enabled: boolean;
+  labels: string[];
+  requireHumanApproval: boolean;
+  botToken?: string;
+  model: string;
+  thinkingLevel: string;
+}
+
+/**
+ * Auto-fix queue item
+ */
+export interface AutoFixQueueItem {
+  issueNumber: number;
+  repo: string;
+  status: 'pending' | 'analyzing' | 'creating_spec' | 'building' | 'qa_review' | 'pr_created' | 'completed' | 'failed';
+  specId?: string;
+  prNumber?: number;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Auto-fix progress status
+ */
+export interface AutoFixProgress {
+  phase: 'checking' | 'fetching' | 'analyzing' | 'creating_spec' | 'building' | 'qa_review' | 'creating_pr' | 'complete';
+  issueNumber: number;
+  progress: number;
+  message: string;
+}
+
+/**
  * GitHub Integration API operations
  */
 export interface GitHubAPI {
@@ -64,6 +100,107 @@ export interface GitHubAPI {
   onGitHubInvestigationError: (
     callback: (projectId: string, error: string) => void
   ) => IpcListenerCleanup;
+
+  // Auto-fix operations
+  getAutoFixConfig: (projectId: string) => Promise<AutoFixConfig | null>;
+  saveAutoFixConfig: (projectId: string, config: AutoFixConfig) => Promise<boolean>;
+  getAutoFixQueue: (projectId: string) => Promise<AutoFixQueueItem[]>;
+  checkAutoFixLabels: (projectId: string) => Promise<number[]>;
+  startAutoFix: (projectId: string, issueNumber: number) => void;
+
+  // Auto-fix event listeners
+  onAutoFixProgress: (
+    callback: (projectId: string, progress: AutoFixProgress) => void
+  ) => IpcListenerCleanup;
+  onAutoFixComplete: (
+    callback: (projectId: string, result: AutoFixQueueItem) => void
+  ) => IpcListenerCleanup;
+  onAutoFixError: (
+    callback: (projectId: string, error: { issueNumber: number; error: string }) => void
+  ) => IpcListenerCleanup;
+
+  // PR operations
+  listPRs: (projectId: string) => Promise<PRData[]>;
+  runPRReview: (projectId: string, prNumber: number) => void;
+  postPRReview: (projectId: string, prNumber: number) => Promise<boolean>;
+  getPRReview: (projectId: string, prNumber: number) => Promise<PRReviewResult | null>;
+
+  // PR event listeners
+  onPRReviewProgress: (
+    callback: (projectId: string, progress: PRReviewProgress) => void
+  ) => IpcListenerCleanup;
+  onPRReviewComplete: (
+    callback: (projectId: string, result: PRReviewResult) => void
+  ) => IpcListenerCleanup;
+  onPRReviewError: (
+    callback: (projectId: string, error: { prNumber: number; error: string }) => void
+  ) => IpcListenerCleanup;
+}
+
+/**
+ * PR data from GitHub API
+ */
+export interface PRData {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  author: { login: string };
+  headRefName: string;
+  baseRefName: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  files: Array<{
+    path: string;
+    additions: number;
+    deletions: number;
+    status: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+  htmlUrl: string;
+}
+
+/**
+ * PR review finding
+ */
+export interface PRReviewFinding {
+  id: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  category: 'security' | 'quality' | 'style' | 'test' | 'docs' | 'pattern' | 'performance';
+  title: string;
+  description: string;
+  file: string;
+  line: number;
+  endLine?: number;
+  suggestedFix?: string;
+  fixable: boolean;
+}
+
+/**
+ * PR review result
+ */
+export interface PRReviewResult {
+  prNumber: number;
+  repo: string;
+  success: boolean;
+  findings: PRReviewFinding[];
+  summary: string;
+  overallStatus: 'approve' | 'request_changes' | 'comment';
+  reviewId?: number;
+  reviewedAt: string;
+  error?: string;
+}
+
+/**
+ * Review progress status
+ */
+export interface PRReviewProgress {
+  phase: 'fetching' | 'analyzing' | 'generating' | 'posting' | 'complete';
+  prNumber: number;
+  progress: number;
+  message: string;
 }
 
 /**
@@ -158,5 +295,66 @@ export const createGitHubAPI = (): GitHubAPI => ({
   onGitHubInvestigationError: (
     callback: (projectId: string, error: string) => void
   ): IpcListenerCleanup =>
-    createIpcListener(IPC_CHANNELS.GITHUB_INVESTIGATION_ERROR, callback)
+    createIpcListener(IPC_CHANNELS.GITHUB_INVESTIGATION_ERROR, callback),
+
+  // Auto-fix operations
+  getAutoFixConfig: (projectId: string): Promise<AutoFixConfig | null> =>
+    invokeIpc(IPC_CHANNELS.GITHUB_AUTOFIX_GET_CONFIG, projectId),
+
+  saveAutoFixConfig: (projectId: string, config: AutoFixConfig): Promise<boolean> =>
+    invokeIpc(IPC_CHANNELS.GITHUB_AUTOFIX_SAVE_CONFIG, projectId, config),
+
+  getAutoFixQueue: (projectId: string): Promise<AutoFixQueueItem[]> =>
+    invokeIpc(IPC_CHANNELS.GITHUB_AUTOFIX_GET_QUEUE, projectId),
+
+  checkAutoFixLabels: (projectId: string): Promise<number[]> =>
+    invokeIpc(IPC_CHANNELS.GITHUB_AUTOFIX_CHECK_LABELS, projectId),
+
+  startAutoFix: (projectId: string, issueNumber: number): void =>
+    sendIpc(IPC_CHANNELS.GITHUB_AUTOFIX_START, projectId, issueNumber),
+
+  // Auto-fix event listeners
+  onAutoFixProgress: (
+    callback: (projectId: string, progress: AutoFixProgress) => void
+  ): IpcListenerCleanup =>
+    createIpcListener(IPC_CHANNELS.GITHUB_AUTOFIX_PROGRESS, callback),
+
+  onAutoFixComplete: (
+    callback: (projectId: string, result: AutoFixQueueItem) => void
+  ): IpcListenerCleanup =>
+    createIpcListener(IPC_CHANNELS.GITHUB_AUTOFIX_COMPLETE, callback),
+
+  onAutoFixError: (
+    callback: (projectId: string, error: { issueNumber: number; error: string }) => void
+  ): IpcListenerCleanup =>
+    createIpcListener(IPC_CHANNELS.GITHUB_AUTOFIX_ERROR, callback),
+
+  // PR operations
+  listPRs: (projectId: string): Promise<PRData[]> =>
+    invokeIpc(IPC_CHANNELS.GITHUB_PR_LIST, projectId),
+
+  runPRReview: (projectId: string, prNumber: number): void =>
+    sendIpc(IPC_CHANNELS.GITHUB_PR_REVIEW, projectId, prNumber),
+
+  postPRReview: (projectId: string, prNumber: number): Promise<boolean> =>
+    invokeIpc(IPC_CHANNELS.GITHUB_PR_POST_REVIEW, projectId, prNumber),
+
+  getPRReview: (projectId: string, prNumber: number): Promise<PRReviewResult | null> =>
+    invokeIpc(IPC_CHANNELS.GITHUB_PR_GET_REVIEW, projectId, prNumber),
+
+  // PR event listeners
+  onPRReviewProgress: (
+    callback: (projectId: string, progress: PRReviewProgress) => void
+  ): IpcListenerCleanup =>
+    createIpcListener(IPC_CHANNELS.GITHUB_PR_REVIEW_PROGRESS, callback),
+
+  onPRReviewComplete: (
+    callback: (projectId: string, result: PRReviewResult) => void
+  ): IpcListenerCleanup =>
+    createIpcListener(IPC_CHANNELS.GITHUB_PR_REVIEW_COMPLETE, callback),
+
+  onPRReviewError: (
+    callback: (projectId: string, error: { prNumber: number; error: string }) => void
+  ): IpcListenerCleanup =>
+    createIpcListener(IPC_CHANNELS.GITHUB_PR_REVIEW_ERROR, callback)
 });
